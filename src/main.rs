@@ -1,4 +1,5 @@
 use gpio_cdev::{Chip, LineRequestFlags};
+use std::{thread, time};
 use serde::{Serialize, Deserialize};
 use warp::{Filter, http::StatusCode};
 
@@ -36,8 +37,11 @@ fn gpio_modify(chip: String, pin: u32, body: GpioCmd) -> GpioModifyResult {
     let line = Chip::new(format!("/dev/{}", chip))?.get_line(pin)?;
     match body {
         GpioCmd::Out { value } => {
-            line.request(LineRequestFlags::OUTPUT, 0, "http-gpio")?
-                .set_value(value as u8)?;
+            // We need to keep the handle in scope
+            // see https://github.com/rust-embedded/gpio-cdev/issues/29
+            let handle = line.request(LineRequestFlags::OUTPUT, 0, "http-gpio")?;
+            handle.set_value(value as u8)?;
+            thread::sleep(time::Duration::from_secs(1));
             Ok(None)
         }
         GpioCmd::In => {
