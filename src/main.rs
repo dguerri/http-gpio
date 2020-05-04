@@ -30,18 +30,19 @@ enum GpioCmd {
     },
 }
 
-type GpioModifyResult = Result<(), gpio_cdev::errors::Error>;
+type GpioModifyResult = Result<Option<u8>, gpio_cdev::errors::Error>;
 
 fn gpio_modify(chip: String, pin: u32, body: GpioCmd) -> GpioModifyResult {
     let line = Chip::new(format!("/dev/{}", chip))?.get_line(pin)?;
     match body {
         GpioCmd::Out { value } => {
             line.request(LineRequestFlags::OUTPUT, 0, "http-gpio")?
-                .set_value(value as u8)
+                .set_value(value as u8)?;
+            Ok(None)
         }
         GpioCmd::In => {
-            line.request(LineRequestFlags::INPUT, 0, "http-gpio")?;
-            Ok(())
+            let handle = line.request(LineRequestFlags::INPUT, 0, "http-gpio")?;
+            Ok(Some(handle.get_value()?))
         }
     }
 }
@@ -49,7 +50,8 @@ fn gpio_modify(chip: String, pin: u32, body: GpioCmd) -> GpioModifyResult {
 fn as_reply(value: GpioModifyResult) -> Box<dyn warp::Reply> {
     // Return if success, or stringify the error if not
     match value {
-        Ok(_) => Box::new("Success"),
+        Ok(None) => Box::new("Success"),
+        Ok(Some(value)) => Box::new(format!("Success, value: {}", value)),
         Err(err) => Box::new(
             warp::reply::with_status(err.to_string(),
                                      StatusCode::INTERNAL_SERVER_ERROR))
