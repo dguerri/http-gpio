@@ -1,7 +1,9 @@
-use gpio_cdev::{Chip, LineRequestFlags};
-use std::{thread, time};
 use serde::{Serialize, Deserialize};
 use warp::{Filter, http::StatusCode};
+use gpio_cdev::{Chip, LineHandle, LineRequestFlags};
+use lazy_static::lazy_static;
+use std::collections::HashMap;
+use std::sync::Mutex;
 
 #[tokio::main]
 async fn main() {
@@ -33,31 +35,44 @@ enum GpioCmd {
 
 type GpioModifyResult = Result<Option<u8>, gpio_cdev::errors::Error>;
 
-fn gpio_modify(chip: String, pin: u32, body: GpioCmd) -> GpioModifyResult {
-    let line = Chip::new(format!("/dev/{}", chip))?.get_line(pin)?;
+lazy_static! {
+    static ref HASHMAP: Mutex<HashMap<String, LineHandle>> = Mutex::new(HashMap::new());
+}
+
+fn gpio_modify(chip_name: String, pin: u32, body: GpioCmd) -> GpioModifyResult {
+    let mut hm = HASHMAP.lock().unwrap();
+    let line_handle_name = format!("{}_{}_{}", chip_name, pin, "out");
+
+    let line_hadle = match hm.get_mut(&line_handle_name) {
+        None => {
+            let mut c = Chip::new(format!("/dev/{}", chip_name))?;
+            let lh = c
+                .get_line(pin)?
+                .request(LineRequestFlags::OUTPUT, 0, "http-gpio")?;
+            hm.insert(line_handle_name.clone(), lh);
+            hm.get_mut(&line_handle_name).unwrap()
+        }
+        Some(lh) => lh,
+    };
+
     match body {
         GpioCmd::Out { value } => {
-            // We need to keep the handle in scope
-            // see https://github.com/rust-embedded/gpio-cdev/issues/29
-            let handle = line.request(LineRequestFlags::OUTPUT, 0, "http-gpio")?;
-            handle.set_value(value as u8)?;
-            thread::sleep(time::Duration::from_secs(1));
+            line_hadle.set_value(value as u8)?;
             Ok(None)
         }
-        GpioCmd::In => {
-            let handle = line.request(LineRequestFlags::INPUT, 0, "http-gpio")?;
-            Ok(Some(handle.get_value()?))
-        }
+        GpioCmd::In => Ok(Some(line_hadle.get_value()?)),
     }
 }
 
 fn as_reply(value: GpioModifyResult) -> Box<dyn warp::Reply> {
     // Return if success, or stringify the error if not
     match value {
-        Ok(None) => Box::new("Success"),
         Ok(Some(value)) => Box::new(format!("Success, value: {}", value)),
-        Err(err) => Box::new(
-            warp::reply::with_status(err.to_string(),
-                                     StatusCode::INTERNAL_SERVER_ERROR))
+        Ok(None) => Box::new("Success"),
+        Err(err) => Box::new(warp::reply::with_status(
+            err.to_string(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
     }
 }
+

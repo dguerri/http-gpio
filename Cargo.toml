@@ -11,3 +11,4 @@ gpio-cdev = "0.2"
 serde = { version = "1.0.105", features = ["derive"] }
 tokio = { version = "0.2", features = ["macros"] }
 warp = "0.2"
+lazy_static = "1.4.0"

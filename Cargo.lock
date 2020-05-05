@@ -374,6 +374,7 @@ name = "http-gpio"
 version = "0.1.0"
 dependencies = [
  "gpio-cdev",
+ "lazy_static",
  "serde",
  "tokio",
  "warp",
